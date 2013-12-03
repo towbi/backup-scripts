@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# rsync-to-backupspace -- rsyn synchronization to on-the-fly mounted backupspace
+#
+# Copyright (C) 2012-08 naymspace software <http://naymspace.de>
+# Copyright (C) 2013-12 Tobias M.-Nissen <tn@movb.de>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Gets the real path of a link, following all links (http://stackoverflow.com/questions/7665/how-to-resolve-symbolic-links-in-a-shell-script)
+myreadlink() { [ ! -h "$1" ] && echo "$1" || (local link="$(expr "$(command ls -ld -- "$1")" : '.*-> \(.*\)$')"; cd $(dirname $1); myreadlink "$link" | sed "s|^\([^/].*\)\$|$(dirname $1)/\1|"); }
+
+dir=$(cd "$(dirname $(myreadlink $0))" && pwd)
+lib="$dir/lib/bash-common-naymspace"
+if ! source "$lib"; then
+    echo "Unable to source library \"$lib\"!" >&2
+    exit 2
+fi
+
+# we do not use -a here to prevent any form of linking (sshfs limitations)
+rsync_opts="-rptgo --delete"
+
+while getopts "v" opt; do
+  case $opt in
+    v) increase_verbosity
+       ;;
+  esac
+done
+
+read_config_file_or_quit
+assert_set_variables "TARGET TARGETDIR SOURCE"
+
+quit() {
+    umount_mountpoints $(echo $TARGET $SOURCE)
+
+    exit $1
+}
+
+echo $(readable_timestamp), $NAME starting rsync from $SOURCE to backupspace at $TARGETDIR.
+
+mount_mountpoints_or_quit $(echo $TARGET $SOURCE)
+
+if [ "$VERBOSE" ]; then rsync_opts="$rsync_opts -v"; fi
+
+rsync $rsync_opts $SOURCE $TARGETDIR
+
+echo $(readable_timestamp), $NAME finished.
+
+quit
+

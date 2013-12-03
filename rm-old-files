@@ -1,0 +1,183 @@
+#!/usr/bin/perl -w
+
+# rm-old-files -- Removal of old files controlled by regex and date
+#
+# Copyright (C) 2012-08 naymspace software <http://naymspace.de>
+# Copyright (C) 2013-12 Tobias M.-Nissen <tn@movb.de>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+use strict;
+use diagnostics;
+
+use Getopt::Long;
+use File::stat;
+use File::Basename;
+
+my $name = basename $0;
+
+my $keep = 8;
+my $dir = undef;
+my $regex = undef;
+my $verbose = undef;
+my $simulate = undef;
+my $help;
+
+# parse command line options
+my $result = GetOptions(
+    'keep=i'   => \$keep,
+    'dir=s'    => \$dir,
+    'verbose'  => \$verbose,
+    'simulate' => \$simulate,
+    'regex=s'  => \$regex,
+    'help'     => \$help,
+);
+
+$verbose = 1 if $simulate;
+
+# display help and exit, if --help is set
+if ($help or not defined $dir or not defined $regex) {
+    print<<EOT;
+Usage: $name --dir=DIR --regex=REGEX [OPTIONS]
+
+Removes all but the last (mtime-wise) NUM files matching the given regex.
+
+Mandatory arguments to long options are mandatory for short options too.
+  -k, --keep=NUM     set the number of files to keep (default: 8)
+  -d, --dir=DIR      set the directory
+  -r, --regex=REGEX  set the regular expression to match files with
+  -v, --verbose      verbose messages, i.e. also display files that are kept
+  -s, --simulate     simulate operation, do not actually delete anything
+                       (implies --verbose)
+  -h, --help         display this help
+
+Providing a keep-value NUM is optional, DIR and REGEX are mandatory. REGEX
+must select one unique string identifying the file type.
+
+Example:
+
+  Say files in /backup/mysql/ look like this:
+
+    activecollab-mysqldump-2012-08-16.sql.gz
+    activecollab-mysqldump-2012-08-17.sql.gz
+    activecollab-mysqldump-2012-08-18.sql.gz
+    [...]
+    ecohtml-mysqldump-2012-08-16.sql.gz
+    ecohtml-mysqldump-2012-08-17.sql.gz
+    ecohtml-mysqldump-2012-08-18.sql.gz
+    [...]
+    magento14-mysqldump-2012-08-16.sql.gz
+    magento14-mysqldump-2012-08-17.sql.gz
+    magento14-mysqldump-2012-08-18.sql.gz
+    [...]
+
+  To keep only the last 5 files of each file type, $name
+  is used like this:
+
+    $name --dir=/backup/mysql \
+      --regex="^(\\S+)-mysqldump-\\S+\\.sql\\.gz\$" --keep=5
+
+  The unique string is selected by "(\\S+)".
+
+EOT
+    exit 0;
+}
+
+# check if $keep has a sane value
+unless ($keep > 0 and $keep < 100000) {
+    print STDERR "ERROR: keep must be between 1 and 99999.\n";
+    exit 1;
+}
+
+# opendir $dir
+my $dh;
+unless (opendir $dh, $dir) {
+    print STDERR "ERROR: unable to open \"$dir\".\n";
+    exit 2;
+}
+
+# get all files matching $regex in $dir
+my @files = grep { /$regex/ and -f "$dir/$_" } readdir $dh;
+
+# stat files and save time info in hash
+my $mtimes = {};
+foreach my $file (@files) {
+    my $sb = stat "$dir/$file";
+    $mtimes->{"$dir/$file"} = $sb->mtime;
+}
+
+sub cmp_filename_prefix_then_mtime {
+    my ($a_prefix) = $a =~ /$regex/;
+    my ($b_prefix) = $b =~ /$regex/;
+
+    # sort by filename prefix and then by mtime
+    my $keycmp = $a_prefix cmp $b_prefix;
+    return $keycmp if $keycmp != 0;
+    return $mtimes->{$b} cmp $mtimes->{$a}
+}
+
+# build lists of files to keep/remove
+my $files_to_keep = {};
+my $files_to_remove = {};
+foreach my $file (sort cmp_filename_prefix_then_mtime keys %$mtimes) {
+    my ($file_prefix) = $file =~ /$regex/;
+
+    $files_to_keep->{$file_prefix} = []
+        unless defined $files_to_keep->{$file_prefix};
+
+    $files_to_remove->{$file_prefix} = []
+        unless defined $files_to_remove->{$file_prefix};
+
+    if (scalar @{$files_to_keep->{$file_prefix}} >= $keep) {
+        push @{$files_to_remove->{$file_prefix}}, $file;
+    }
+    else {
+        push @{$files_to_keep->{$file_prefix}}, $file;
+    }
+
+}
+
+print <<EOT if $verbose;
+Removing old files in \"$dir\"
+using regex /$regex/
+and keep-value $keep
+
+EOT
+
+if (scalar keys %$mtimes == 0) { print "No files found.\n\n"; exit 0; }
+
+my $kept_files = 0;
+print "Keeping these files:\n" if $verbose;
+foreach my $file_prefix (sort keys %$files_to_keep) {
+    foreach my $file (sort @{$files_to_keep->{$file_prefix}}) {
+        print "$file\n" if $verbose;
+        $kept_files++;
+    }
+}
+print "\n" if $verbose;
+
+if ($kept_files == 0) {
+    die "Found files but no files to keep!? Something is wrong.\n\n";
+}
+
+print "Removing files...\n";
+foreach my $file_prefix (sort keys %$files_to_remove) {
+    foreach my $file (sort @{$files_to_remove->{$file_prefix}}) {
+        print "$file ...";
+        unlink $file if not $simulate;
+        print "done.\n";
+    }
+}
+print "\n\n";
+

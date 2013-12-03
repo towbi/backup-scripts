@@ -1,0 +1,123 @@
+#!/bin/bash
+# Copyright (C) 2012-08 naymspace <http://naymspace.de>
+# Programming by Tobias M.-Nissen <tn@naymspace.de>
+#
+# lib/bash-backup-naymspace
+#
+# Constants and functions common to naymspace backup bash scripts.
+
+#
+# constants
+#
+
+FULL_BACKUP_ERROR=650
+DIFFERENTIAL_BACKUP_ERROR=651
+SNAPSHOT_FILE_ERROR=652
+LV_SNAPSHOT_ERROR=653
+
+#
+# functions
+#
+
+gen_filename() {
+    local dir=$1
+    local id=$2
+    local type=$3
+    local suffix=$4
+    local canonical=$5 # false if empty string or unset, true otherwise
+    local _try=$6
+
+    if [ ! "$_try" ]; then _try=0; fi
+
+    if [ "$canonical" ]; then
+        filename=$id-$type-$(date +"%F_%H-%M-%S")$suffix
+    else
+        filename=$id-$type-$(date +"%F")$suffix
+    fi
+
+    if [ -e $dir/$filename ]; then
+        if [ $_try -ge 3 ]; then
+            die "I was not able to generate a filename after $(($_try+1)) tries. Something is seriously wrong here."
+        else
+            if [ $_try -ne 0 ]; then sleep 1; fi
+            gen_filename $dir $id $type $suffix true $(($_try+1))
+        fi
+    else
+        echo $filename
+    fi
+}
+
+lv_exists() {
+    local vg=$1
+    local lv=$2
+
+    lvdisplay /dev/$vg/$lv 1>/dev/null 2>&1
+}
+
+create_and_mount_lv_snapshot() {
+    local vg=$1
+    local lv=$2
+    local snapshot_size=$3
+
+    if [ ! "$snapshot_size" ]; then
+        if [ ! "$LV_SNAPSHOT_SIZE" ]; then
+            stderr "No snapshot size provided"
+            return $UNKNOWN_ERROR
+        else
+            snapshot_size=$LV_SNAPSHOT_SIZE
+        fi
+    fi
+
+    local temp_mount=$(mktemp -d)
+    local temp_mount_base=$(basename $temp_mount)
+
+    if lv_exists $vg $temp_mount_base; then
+        stderr "Unable to create temporary LV (\"$temp_mount_base\" already exists)"
+        return $LV_SNAPSHOT_ERROR
+    fi
+
+    if ! lvcreate -L$snapshot_size -s -n $temp_mount_base /dev/$vg/$lv >/dev/null; then
+        rmdir $temp_mount
+        stderr "Error creating temporary LV snapshot \"$temp_mount_base\" in volume group \"$vg\""
+        return $LV_SNAPSHOT_ERROR
+    fi
+
+    if ! mount /dev/$vg/$temp_mount_base $temp_mount; then
+        rmdir $temp_mount
+        stderr "Error mounting temporary LV snapshot at \"/dev/$vg/$temp_mount_base\""
+        return $LV_SNAPSHOT_ERROR
+    fi
+
+    echo $temp_mount
+}
+
+umount_and_remove_lv_snapshot() {
+    local vg=$1
+    local mount=$2
+
+    local lv=$(basename $mount)
+
+    vvecho Umounting LV snapshot at $mount
+    if ! umount $mount; then
+        stderr "Error unmounting \"$mount\""
+        return $LV_SNAPSHOT_ERROR
+    else
+        if ! rmdir $mount; then
+            stderr "Error removing mountpoint directory \"$mount\""
+            # not a critical error, so we do not quit here
+        fi
+    fi
+
+    if lv_exists $vg $lv; then
+        echo about to remove lv $lv in vg $vg
+        vvecho Removing LV snapshot \"/dev/$vg/$lv\"
+        if ! lvremove -f /dev/$vg/$lv; then
+            stderr "Error removing \"/dev/$vg/$lv\""
+            return $LV_SNAPSHOT_ERROR
+        fi
+    else
+        stderr "There is no volume \"$lv\" in volume group \"$vg\""
+        return $UNKNOWN_ERROR
+    fi
+}
+

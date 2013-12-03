@@ -1,0 +1,65 @@
+#!/bin/bash
+
+# mysql-backup -- MySQL gzip dumps of all databases
+#
+# Copyright (C) 2012-08 naymspace software <http://naymspace.de>
+# Copyright (C) 2013-12 Tobias M.-Nissen <tn@movb.de>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Gets the real path of a link, following all links (http://stackoverflow.com/questions/7665/how-to-resolve-symbolic-links-in-a-shell-script)
+myreadlink() { [ ! -h "$1" ] && echo "$1" || (local link="$(expr "$(command ls -ld -- "$1")" : '.*-> \(.*\)$')"; cd $(dirname $1); myreadlink "$link" | sed "s|^\([^/].*\)\$|$(dirname $1)/\1|"); }
+
+dir=$(cd "$(dirname $(myreadlink $0))" && pwd)
+lib="$dir/lib/bash-common-naymspace"
+if ! source "$lib"; then
+    echo "Unable to source library \"$lib\"!" >&2
+    exit 2
+fi
+
+source_libs_or_quit "bash-backup-naymspace"
+
+read_config_file_or_quit
+assert_set_variables "TARGET"
+
+#
+## initialization
+#
+
+databases=$(mysqlshow | awk '{print $2}' | tail -n+4)
+
+#
+## main program
+#
+
+echo $(readable_timestamp), $NAME starting backup of MySQL databases
+
+cd $TARGET
+
+for database in $databases; do
+    filename=$(gen_filename $TARGET $database mysqldump .sql.gz)
+    echo -n " * Dumping $database into $filename ... "
+    if [ ! -e "$filename" ]; then
+        if mysqldump --opt --single-transaction $database | gzip > "$TARGET/$filename"; then
+            echo done.
+        else
+            stderr Backup of $database failed.
+        fi
+    else
+        stderr \"$filename\" exists! This should not have happened...
+    fi
+done
+
+echo -e "$(readable_timestamp), $NAME finished backup of MySQL databases.\n"
+

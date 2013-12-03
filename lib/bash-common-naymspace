@@ -1,0 +1,165 @@
+#!/bin/bash
+
+# bash-common-naymspace -- constants and functions common to all naymspace
+# bash scripts.
+#
+# Copyright (C) 2012-08 naymspace <http://naymspace.de>
+# Copyright (C) 2013-12 Tobias M.-Nissen <tn@movb.de>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Copyright (C) 2012-08 naymspace <http://naymspace.de>
+# Programming by Tobias M.-Nissen <tn@naymspace.de>
+
+# This lib must be sourced (included) before all other libs are sourced.
+
+UNKNOWN_ERROR=450
+CONFIG_FILE_NOT_FOUND=451
+CONFIG_FILE_SOURCE_ERROR=452
+MOUNT_ERROR=453
+UMOUNT_ERROR=454
+UNSET_VARIABLE=455
+LIB_SOURCE_ERROR=456
+INVALID_COMMAND_LINE_OPTION=457
+
+VERBOSE=0 # modified by scripts using increase_verbosity
+NAME=$(basename $0)
+CONFIG_FILE=~/.naymspace/$NAME.conf
+
+#
+# functions
+#
+
+stderr() {
+    echo "$*" >&2
+}
+
+die() {
+    local frame=0
+ 
+    stderr "*** An Error occurred. Call stack is following. ***"
+    while caller $frame; do
+        ((frame++));
+    done
+ 
+    stderr "Error: $*"
+    exit $UNKNOWN_ERROR
+}
+
+read_config_file_or_quit() {
+    local config_file=$1
+
+    if [ ! "$config_file" ]; then
+        if [ "$CONFIG_FILE" ]; then
+            config_file=$CONFIG_FILE
+        else
+            stderr "No path to config file available."
+            exit $CONFIG_FILE_NOT_FOUND
+        fi
+    fi
+
+    if [ "$config_file" ]; then
+        if [ -r "$config_file" ]; then
+            if ! source "$config_file"; then
+                stderr "Can not source (include) configuration file \"$config_file\"."
+                exit $CONFIG_FILE_SOURCE_ERROR
+            fi
+        else
+            stderr "Can not read configuration file at \"$config_file\"."
+            exit $CONFIG_FILE_NOT_FOUND
+        fi
+    else
+        die Parameter config_file not set.
+    fi
+}
+
+increase_verbosity() {
+    ((VERBOSE++))
+}
+
+vecho()   { if [ $VERBOSE -gt 0 ]; then echo $@; fi }
+vvecho()  { if [ $VERBOSE -gt 1 ]; then echo $@; fi }
+vvvecho() { if [ $VERBOSE -gt 2 ]; then echo $@; fi }
+
+extract_iso_dates() {
+    echo $@ | egrep -o '[[:digit:]]{4}-[[:digit:]]{2}-[[:digit:]]{2}'
+}
+
+extract_first_iso_date() {
+    extract_iso_dates $@ | head -n1
+}
+
+mount_mountpoints_or_quit() {
+    local mountpoints=$@
+
+    for mountpoint in $mountpoints; do
+        vecho Mounting $mountpoint
+        if ! mountpoint -q $mountpoint; then
+            if ! mount $mountpoint; then
+                stderr "Unable to mount \"$mountpoint\". Exiting."
+                umount_mountpoints $mountpoints
+                exit $MOUNT_ERROR
+            fi
+        else
+            stderr Can not mount \"$mountpoint\" since it is already mounted.
+            # we are not exiting here, because this isn't an error in most cases
+        fi
+    done
+}
+
+umount_mountpoints() {
+    local mountpoints=$@
+
+    for mountpoint in $mountpoints; do
+        vecho Unmounting $mountpoint
+        if mountpoint -q $mountpoint; then
+            umount $mountpoint
+        else
+            vecho Can not unmount $mountpoint since it is not mounted.
+        fi
+    done
+}
+
+assert_set_variables() {
+    local vars=$@
+
+    for var in $vars; do
+        if [ ! "${!var}" ]; then
+            stderr "Variable \"$var\" is not set."
+            exit $UNSET_VARIABLE
+        fi
+    done
+}
+
+# Gets the real path of a link, following all links (http://stackoverflow.com/questions/7665/how-to-resolve-symbolic-links-in-a-shell-script)
+myreadlink() {
+    [ ! -h "$1" ] && echo "$1" || (local link="$(expr "$(command ls -ld -- "$1")" : '.*-> \(.*\)$')"; cd $(dirname $1); myreadlink "$link" | sed "s|^\([^/].*\)\$|$(dirname $1)/\1|");
+}
+
+source_libs_or_quit() {
+    local libs=$@
+
+    for lib in $libs; do
+        local dir=$(cd "$(dirname $(myreadlink $0))" && pwd)
+        local lib_path="$dir/lib/$lib"
+        if ! source "$lib_path"; then
+            stderr "Unable to source library \"$lib\" (\"$lib_path\")."
+            exit $LIB_SOURCE_ERROR
+        fi
+    done
+}
+
+readable_timestamp() {
+    date +"%F, %R"
+}
+
