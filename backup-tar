@@ -1,0 +1,161 @@
+#!/bin/bash
+
+# backup-tar -- full and differential tar backups
+#
+# Copyright (C) 2015 Tobias M.-Nissen <tn@movb.de>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# See http://www.gnu.org/software/tar/manual/html_section/Incremental-Dumps.html
+
+# Gets the real path of a link, following all links (http://stackoverflow.com/questions/7665/how-to-resolve-symbolic-links-in-a-shell-script)
+myreadlink() { [ ! -h "$1" ] && echo "$1" || (local link="$(expr "$(command ls -ld -- "$1")" : '.*-> \(.*\)$')"; cd $(dirname $1); myreadlink "$link" | sed "s|^\([^/].*\)\$|$(dirname $1)/\1|"); }
+
+dir=$(cd "$(dirname $(myreadlink $0))" && pwd)
+lib="$dir/lib/bash-common-naymspace"
+if ! source "$lib"; then
+    echo "Unable to source library \"$lib\"!" >&2
+    exit 2
+fi
+
+source_libs_or_quit "bash-backup-naymspace"
+
+TAR_OPTIONS="--no-check-device -cz"
+
+while getopts "fdvk" opt; do
+  case $opt in
+    f) full=1
+       ;;
+    d) differential=1
+       ;;
+    v) increase_verbosity
+       ;;
+    k) keep=1
+       increase_verbosity
+       increase_verbosity
+       ;;
+    \?)
+      stderr "Invalid option: -$OPTARG"
+      # stderr "See \"$NAME -h\" for help."
+      exit $INVALID_COMMAND_LINE_OPTION
+      ;;
+  esac
+done
+
+read_config_file_or_quit
+assert_set_variables "TARGET DIRECTORIES KEEP_FULL KEEP_DIFFERENTIAL RM_OLD_FILES"
+
+if [ ! "$full" -o "$differential" ]; then
+    stderr "You must provide either -f (full) or -d (differential)."
+    exit $INVALID_COMMAND_LINE_OPTION
+fi
+
+quit() {
+    echo
+    if [ ! "$keep" -o "$keep" = "0" ]; then
+        umount_mountpoints $TARGET
+    fi
+
+    exit $1
+}
+
+# create full backup if -f is set
+if [ "$full" ]; then
+    for dir in $DIRECTORIES; do
+        archivename=$(gen_filename $TARGET $dir full .tar.gz)
+        logname=$(gen_filename $TARGET $dir full .snar)
+        echo $(readable_timestamp), $NAME is creating a full tar backup of \"$dir\".
+
+        vecho TAR archive: $archivename
+        vecho TAR snapshot: $logname
+
+        if pushd $dir > /dev/null; then
+            if tar $TAR_OPTIONS -f "$TARGET/$archivename" -g "$TARGET/$logname" .; then
+                if [ ! "$keep" -o "$keep" = "0" ]; then
+                    if [ "$KEEP_FULL" -a $KEEP_FULL -gt 0 ]; then
+                        echo
+                        id=$(escape_id $dir)
+                        $RM_OLD_FILES -v -d $TARGET -k $KEEP_FULL -r "($id)-full-\S+\.tar\.gz"
+                        $RM_OLD_FILES -v -d $TARGET -k $KEEP_FULL -r "($id)-full-\S+\.snar"
+                    fi
+                fi
+            else
+                stderr Full backup of \"$dir\" was not successful.
+                error=$FULL_BACKUP_ERROR
+            fi
+            popd > /dev/null
+        fi
+    done
+elif [ "$differential" ]; then
+    for dir in $DIRECTORIES; do
+        newest_log_glob=$(gen_filename $TARGET $dir full .snar 2)
+        newest_log=$(ls --sort=time $newest_log_glob | head -n1)
+
+        echo "nlg: $newest_log_glob"
+        echo "nl: $newest_log"
+
+        date=$(extract_first_iso_date $newest_log)
+        archivename=$(gen_filename $TARGET $dir from-$date-diff .tar.gz)
+        echo $(readable_timestamp), $NAME is creating a differential tar backup of \"$dir\".
+
+        vecho TAR archive: $archivename
+        vecho TAR snapshot: $newest_log
+
+        # tar -g modifies log; save it for later
+        newest_log_copy=$(mktemp)
+        if ! cp -p $newest_log $newest_log_copy; then
+            stderr "Unable to copy snapshot file, skipping \"$dir\"."
+            rm $newest_log_copy
+            error=$SNAPSHOT_FILE_ERROR
+            continue
+        fi
+
+        if pushd $dir > /dev/null; then
+            if tar $TAR_OPTIONS -f "$TARGET/$archivename" -g "$newest_log" .; then
+                if [ ! "$keep" -o "$keep" = "0" ]; then
+                    if [ "$KEEP_DIFFERENTIAL" -a $KEEP_DIFFERENTIAL -gt 0 ]; then
+                        echo
+                        id=$(escape_id $dir)
+                        $RM_OLD_FILES -v -d $TARGET -k $KEEP_DIFFERENTIAL -r "($id)-from-\S+-diff-\S+\.tar\.gz"
+                    fi
+                fi
+            else
+                stderr Differential backup of \"$dir\" was not successful.
+                error=$DIFFERENTIAL_BACKUP_ERROR
+            fi
+            popd > /dev/null
+        fi
+
+        # Copy original log back. This makes sure the next backup is level 1
+        # again, making this a differential backup (and not an incremental
+        # one).
+        if ! cp -p $newest_log_copy $newest_log; then
+            stderr "Unable to copy original snapshot file back to \"$newest_log\"."
+            stderr "The original file is available at \"newest_log_copy\"."
+            error=$SNAPSHOT_FILE_ERROR
+        else
+            rm $newest_log_copy
+        fi
+    done
+fi
+
+if [ "$error" -a "$error" != "0" ]; then
+    stderr "$(readable_timestamp), $NAME finished with error $error."
+else
+    echo $(readable_timestamp), $NAME finished.
+fi
+
+quit $error
+
+# vim:ft=sh

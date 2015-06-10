@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# bash-common-naymspace -- constants and functions common to naymspace
+# bash-backup-naymspace -- constants and functions common to naymspace
 # backup scripts.
 #
-# Copyright (C) 2012-08 naymspace <http://naymspace.de>
-# Copyright (C) 2013-12 Tobias M.-Nissen <tn@movb.de>
+# Copyright (C) 2012 naymspace <http://naymspace.de>
+# Copyright (C) 2013-2015 Tobias M.-Nissen <tn@movb.de>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -37,15 +37,24 @@ gen_filename() {
     local id=$2
     local type=$3
     local suffix=$4
-    local canonical=$5 # false if empty string or unset, true otherwise
+    local timestamp=$5 # default if empty string, unset or 0, 1 for canonical, 2 for glob star (*)
     local _try=$6
 
     if [ ! "$_try" ]; then _try=0; fi
 
-    if [ "$canonical" ]; then
-        filename=$id-$type-$(date +"%F_%H-%M-%S")$suffix
+    local id_escaped=$(escape_id $id)
+    local filename=""
+
+    if [ "$timestamp" == 1 ]; then
+        filename=$id_escaped-$type-$(date +"%F_%H-%M-%S")$suffix
+    elif [ "$timestamp" == 2 ]; then
+        set -f
+        filename=$id_escaped-$type-*$suffix
+        echo $filename
+        set +f
+        return
     else
-        filename=$id-$type-$(date +"%F")$suffix
+        filename=$id_escaped-$type-$(date +"%F")$suffix
     fi
 
     if [ -e $dir/$filename ]; then
@@ -53,7 +62,7 @@ gen_filename() {
             die "I was not able to generate a filename after $(($_try+1)) tries. Something is seriously wrong here."
         else
             if [ $_try -ne 0 ]; then sleep 1; fi
-            gen_filename $dir $id $type $suffix true $(($_try+1))
+            gen_filename $dir $id $type $suffix 1 $(($_try+1))
         fi
     else
         echo $filename
