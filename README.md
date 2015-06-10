@@ -6,9 +6,9 @@ A collection of backup scripts using TAR, LVM, mount, RSYNC and MySQL
 
 backup-scripts
 
-Copyright (C) 2012-08 naymspace <http://naymspace.de>
+Copyright (C) 2012 naymspace <http://naymspace.de>
 
-Copyright (C) 2013-12 Tobias M.-Nissen <tn@movb.de>
+Copyright (C) 2013-2015 Tobias M.-Nissen <tn@movb.de>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
