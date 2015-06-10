@@ -100,10 +100,7 @@ if [ "$full" ]; then
 elif [ "$differential" ]; then
     for dir in $DIRECTORIES; do
         newest_log_glob=$(gen_filename $TARGET $dir full .snar 2)
-        newest_log=$(ls --sort=time $newest_log_glob | head -n1)
-
-        echo "nlg: $newest_log_glob"
-        echo "nl: $newest_log"
+        newest_log=$(ls --sort=time $TARGET/$newest_log_glob | head -n1)
 
         date=$(extract_first_iso_date $newest_log)
         archivename=$(gen_filename $TARGET $dir from-$date-diff .tar.gz)
