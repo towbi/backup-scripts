@@ -99,12 +99,18 @@ if [ "$full" ]; then
     done
 elif [ "$differential" ]; then
     for dir in $DIRECTORIES; do
+        echo $(readable_timestamp), $NAME is creating a differential tar backup of \"$dir\".
         newest_log_glob=$(gen_filename $TARGET $dir full .snar 2)
-        newest_log=$(ls --sort=time $TARGET/$newest_log_glob | head -n1)
+        newest_log=$(ls --sort=time $TARGET/$newest_log_glob 2>/dev/null | head -n1)
+
+        if [ -z "$newest_log" ]; then
+            stderr "No snapshot file found, skipping \"$dir\"."
+            error=$SNAPSHOT_FILE_ERROR
+            continue
+        fi
 
         date=$(extract_first_iso_date $newest_log)
         archivename=$(gen_filename $TARGET $dir from-$date-diff .tar.gz)
-        echo $(readable_timestamp), $NAME is creating a differential tar backup of \"$dir\".
 
         vecho TAR archive: $archivename
         vecho TAR snapshot: $newest_log
