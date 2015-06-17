@@ -9,7 +9,7 @@ Sample crontab:
 
 23 04 *   *   7   $MYBIN/backup-tar -f 1>> $MYLOG/backup-tar.log 2>&1
 23 04 *   *   1-6 $MYBIN/backup-tar -d 1>> $MYLOG/backup-tar.log 2>&1
-´´´
+```
 
 ## License
 
