@@ -2,6 +2,15 @@
 
 A collection of backup scripts using TAR, LVM, mount, RSYNC and MySQL
 
+Sample crontab:
+```
+23 03 *   *   *   $MYBIN/mysql-backup 1>> $MYLOG/mysql-backup.log 2>&1
+23 02 *   *   *   $MYBIN/rm-old-files --dir=/backup/ --regex="^(\S+)-mysqldump-\S+\.sql.gz" --keep=30 1>> $MYLOG/mysql-backup.log 2>&1
+
+23 04 *   *   7   $MYBIN/backup-tar -f 1>> $MYLOG/backup-tar.log 2>&1
+23 04 *   *   1-6 $MYBIN/backup-tar -d 1>> $MYLOG/backup-tar.log 2>&1
+´´´
+
 ## License
 
 backup-scripts
