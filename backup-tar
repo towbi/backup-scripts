@@ -3,6 +3,7 @@
 # backup-tar -- full and differential tar backups
 #
 # Copyright (C) 2015 Tobias M.-Nissen <tn@movb.de>
+# Copyright (C) 2016 Tobias König <tn@movb.de>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
